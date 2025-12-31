@@ -7,6 +7,7 @@ const hiddenFeatureCheckbox = document.getElementById('hiddenFeature');
 const dataAnalysisCheckbox = document.getElementById('dataAnalysis');
 const geniusCombineTagCheckbox = document.getElementById('geniusCombineTag');
 const geniusAlphaCountInput = document.getElementById('geniusAlphaCount');
+const geniusStartDateOverrideInput = document.getElementById('geniusStartDateOverride'); // New input element
 const apiMonitorEnabledCheckbox = document.getElementById('apiMonitorEnabled');
 const saveBtn = document.getElementById('saveBtn');
 const statusText = document.getElementById('status');
@@ -17,15 +18,42 @@ const importCommunityBtn = document.getElementById('importCommunityBtn');
 const importCommunityFile = document.getElementById('importCommunityFile');
 const aggregateSharpeBtn = document.getElementById('aggregateSharpeBtn');
 
+// Helper function to get the start date of the current quarter in YYYY-MM-DD format
+function getCurrentQuarterStartDate() {
+    const currentDate = new Date();
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth(); // 0-indexed
+
+    let quarterStartMonth;
+    if (month >= 0 && month <= 2) { // Q1: Jan-Mar
+        quarterStartMonth = 0;
+    } else if (month >= 3 && month <= 5) { // Q2: Apr-Jun
+        quarterStartMonth = 3;
+    } else if (month >= 6 && month <= 8) { // Q3: Jul-Sep
+        quarterStartMonth = 6;
+    } else { // Q4: Oct-Dec
+        quarterStartMonth = 9;
+    }
+
+    const quarterStartDate = new Date(year, quarterStartMonth, 1);
+    const yyyy = quarterStartDate.getFullYear();
+    const mm = String(quarterStartDate.getMonth() + 1).padStart(2, '0'); // Months are 0-indexed
+    const dd = String(quarterStartDate.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+}
+
 // 加载用户设置
 function loadSettings() {
+    console.log('[popup.js] Entering loadSettings function.'); // New entry log
     statusText.textContent = '加载中...';
     chrome.storage.local.get('WQPSettings', ({ WQPSettings }) => {
+        console.log('[popup.js] WQPSettings loaded:', WQPSettings); // Log what's being loaded
         dbAddressInput.value = WQPSettings.apiAddress || '';
         hiddenFeatureCheckbox.checked = WQPSettings.hiddenFeatureEnabled || false;
         dataAnalysisCheckbox.checked = WQPSettings.dataAnalysisEnabled || false;
         geniusCombineTagCheckbox.checked = WQPSettings.geniusCombineTag || false;
         geniusAlphaCountInput.value = WQPSettings.geniusAlphaCount || 40;
+        geniusStartDateOverrideInput.value = WQPSettings.geniusStartDateOverride || getCurrentQuarterStartDate(); // Load new setting, default to current quarter start
         apiMonitorEnabledCheckbox.checked = WQPSettings.apiMonitorEnabled || false;
 
         saveBtn.disabled = !dbAddressInput.value.trim();
@@ -35,6 +63,7 @@ function loadSettings() {
 
 // 保存用户设置
 function saveSettings(event) {
+    console.log('[popup.js] Entering saveSettings function.'); // New entry log
     event.preventDefault();
     saveBtn.disabled = true;
     const WQPSettings = {
@@ -43,8 +72,10 @@ function saveSettings(event) {
         dataAnalysisEnabled: dataAnalysisCheckbox.checked,
         geniusCombineTag: geniusCombineTagCheckbox.checked,
         geniusAlphaCount: parseInt(geniusAlphaCountInput.value) || 40,
+        geniusStartDateOverride: geniusStartDateOverrideInput.value.trim(), // Save new setting
         apiMonitorEnabled: apiMonitorEnabledCheckbox.checked
     };
+    console.log('[popup.js] Attempting to save WQPSettings:', WQPSettings); // Log what's being saved
 
     if (!WQPSettings.apiAddress) {
         showStatusMessage('请输入有效的地址！', false);
@@ -53,9 +84,11 @@ function saveSettings(event) {
     }
     chrome.storage.local.set({ WQPSettings }, () => {
         if (chrome.runtime.lastError) {
+            console.error('[popup.js] Error saving WQPSettings:', chrome.runtime.lastError); // Log error
             showStatusMessage('保存失败，请重试！', false);
             saveBtn.disabled = false;
         } else {
+            console.log('[popup.js] WQPSettings saved successfully.'); // Log success
             showStatusMessage('设置已保存！', true);
             setTimeout(() => {
                 statusText.textContent = '';

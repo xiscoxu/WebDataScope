@@ -20,11 +20,14 @@ const targetSelectorButton = '#root > div > div.genius__container > div > div > 
 
 // ############################## 运算符分析 ##############################
 
-async function fetchAllAlphas(forceRefresh = false) {
+async function fetchAllAlphas(forceRefresh = false, isSelf = false) { // Added isSelf parameter
     // 抓取本季度所有的alpha
     // Removed setButtonState('WQPOPSFetchButton', `开始抓取...`,'load'); as this function should not manage the button state directly.
 
-    const cacheKey = 'WQPAllAlphasCache'; // New cache key for all alphas
+    let cacheKey = 'WQPAllAlphasCache'; // Changed to 'let'
+    if (isSelf) {
+        cacheKey += '_SELF'; // Differentiate cache for self-user's specific date range
+    }
     const CACHE_DURATION = 5 * 60 * 1000; // Cache for 5 minutes
 
     if (!forceRefresh) {
@@ -39,7 +42,7 @@ async function fetchAllAlphas(forceRefresh = false) {
             return storedCache.data;
         }
     } else {
-        console.log('Force refreshing: Clearing WQPAllAlphasCache from storage.');
+        console.log('Force refreshing: Clearing ' + cacheKey + ' from storage.'); // Added cacheKey to log
         await chrome.storage.local.remove(cacheKey);
     }
 
@@ -53,7 +56,45 @@ async function fetchAllAlphas(forceRefresh = false) {
         { start: `${year}-07-01T04:00:00.000Z`, end: `${year}-10-01T04:00:00.000Z` },  // 第三季度
         { start: `${year}-10-01T04:00:00.000Z`, end: `${year+1}-01-01T05:00:00.000Z` }   // 第四季度
     ];
-    const { start, end } = quarters[quarter - 1];
+    let { start, end } = quarters[quarter - 1]; // Changed to 'let' to allow modification
+    console.log(`[fetchAllAlphas] isSelf: ${isSelf}`);
+    console.log(`[fetchAllAlphas] Initial quarter start date: ${start}`);
+
+    // New logic for self-user's start date
+    if (isSelf) {
+        console.log(`[fetchAllAlphas] Checking for geniusStartDateOverride.`);
+        const WQPSettings = await new Promise(resolve => {
+            chrome.storage.local.get('WQPSettings', (result) => {
+                resolve(result.WQPSettings || {});
+            });
+        });
+        const overrideDateString = WQPSettings.geniusStartDateOverride;
+        console.log(`[fetchAllAlphas] Loaded geniusStartDateOverride: ${overrideDateString}`);
+
+        let effectiveStartDate = new Date(start); // Convert calculated start string to Date object
+
+        if (overrideDateString) {
+            const parsedOverrideDate = new Date(overrideDateString + 'T00:00:00.000Z'); // Assume UTC for consistency
+            if (!isNaN(parsedOverrideDate.getTime())) { // Check if date is valid
+                console.log(`[fetchAllAlphas] Using override date: ${parsedOverrideDate.toISOString()}`);
+                effectiveStartDate = parsedOverrideDate;
+            } else {
+                console.warn(`[fetchAllAlphas] Invalid geniusStartDateOverride: ${overrideDateString}. Falling back to default logic.`);
+            }
+        } else {
+            console.log(`[fetchAllAlphas] No geniusStartDateOverride found. Using default logic.`);
+        }
+
+        // Ensure the effective start date is not before the quarter start if no override or invalid override
+        const quarterStartDate = new Date(quarters[quarter - 1].start);
+        if (effectiveStartDate < quarterStartDate) {
+            effectiveStartDate = quarterStartDate;
+        }
+        
+        start = effectiveStartDate.toISOString(); // Convert back to ISO string for the URL
+        console.log(`[fetchAllAlphas] Final effective start date after override/default logic: ${start}`);
+    }
+    console.log(`[fetchAllAlphas] Final start date for dateRange: ${start}`);
     const dateRange = `dateSubmitted%3E${start}&dateSubmitted%3C${end}`;
 
     const limit = 30; // Data limit per page
@@ -74,7 +115,7 @@ async function opsAna(forceRefresh = false) {
             await chrome.storage.local.remove('WQPOPSAna');
         }
         
-        let data = await fetchAllAlphas(forceRefresh);
+        let data = await fetchAllAlphas(forceRefresh, true); // Changed to true for isSelf
         let operators = await getDataFromUrl(OptUrl);
         operators = operators.filter(item => item.scope.includes('REGULAR'));
 
@@ -131,7 +172,7 @@ async function opsAna(forceRefresh = false) {
         });
         setButtonState('WQPOPSFetchButton', `运算符分析完成${data.length}`, 'enable');
         // Automatically display "我的排名" after Operator Analysis is complete
-        await insertMyRankInfo(null, null, true); // Force refresh for my rank info
+        // await insertMyRankInfo(null, null, true); // Temporarily commented out to prevent 'No rank data found' error
     } catch (error) {
         console.error("运算符分析失败:", error);
         setButtonState('WQPOPSFetchButton', `分析失败,请查看控制台`, 'error');
@@ -436,30 +477,29 @@ async function getAllRank(ignoreCombine = false) {
             let grandmasterCandidates = filteredBaseCountData.filter(item => determineUserLevel(item, WQPSettings.geniusCombineTag, ignoreCombine) === 'grandmaster');
 
 
-            let expertCount = Math.round(baseCount * 0.2);
-            let masterCount = Math.round(baseCount * 0.08);
-            let grandmasterCount = Math.round(baseCount * 0.02);
+            let expertCount = Math.min(Math.round(baseCount * 0.2), 675);
+            let masterCount = Math.min(Math.round(baseCount * 0.08), 250);
+            let grandmasterCount = Math.min(Math.round(baseCount * 0.02), 75);
 
             // Sort candidates by their respective total ranks and assign final level
             expertCandidates.sort((a, b) => a.expertTotalRank - b.expertTotalRank);
             masterCandidates.sort((a, b) => a.masterTotalRank - b.masterTotalRank);
             grandmasterCandidates.sort((a, b) => a.grandmasterTotalRank - b.grandmasterTotalRank);
 
-            // Assign final levels based on counts and sorted candidates
-            expertCandidates.slice(0, expertCount).forEach(item => { item.finalLevel = 'expert'; });
-            masterCandidates.slice(0, masterCount).forEach(item => { item.finalLevel = 'master'; });
-            grandmasterCandidates.slice(0, grandmasterCount).forEach(item => { item.finalLevel = 'grandmaster'; });
+            // Assign final levels respecting the caps and hierarchy
+            const finalGrandmasters = new Set(grandmasterCandidates.slice(0, grandmasterCount).map(u => u.user));
+            const finalMasters = new Set(masterCandidates.filter(u => !finalGrandmasters.has(u.user)).slice(0, masterCount).map(u => u.user));
+            const finalExperts = new Set(expertCandidates.filter(u => !finalGrandmasters.has(u.user) && !finalMasters.has(u.user)).slice(0, expertCount).map(u => u.user));
 
-            // Ensure unique levels for each user based on highest achieved level
             data.forEach(user => {
-                if (grandmasterCandidates.includes(user) && user.finalLevel === 'grandmaster') {
+                if (finalGrandmasters.has(user.user)) {
                     user.finalLevel = 'grandmaster';
-                } else if (masterCandidates.includes(user) && user.finalLevel === 'master') {
+                } else if (finalMasters.has(user.user)) {
                     user.finalLevel = 'master';
-                } else if (expertCandidates.includes(user) && user.finalLevel === 'expert') {
+                } else if (finalExperts.has(user.user)) {
                     user.finalLevel = 'expert';
                 } else {
-                    user.finalLevel = 'gold'; // Default to gold if no higher level achieved
+                    user.finalLevel = 'gold';
                 }
             });
 
@@ -927,9 +967,9 @@ function rankInfo2Html(result, ignoreCombineChecked = false, isCard = false, two
 
     <strong>各个Level 满足的人数 / 最终的人数:</strong><br>
     <ul>
-        <li>For Expert: ${result.expert.count} / ${Math.round(result.gold.baseCount * 0.2)}</li>
-        <li>For Master: ${result.master.count} / ${Math.round(result.gold.baseCount * 0.08)}</li>
-        <li>For Grandmaster: ${result.grandmaster.count} / ${Math.round(result.gold.baseCount * 0.02)}</li>
+        <li>For Expert: ${result.expert.count} / ${Math.min(Math.round(result.gold.baseCount * 0.2), 675)}</li>
+        <li>For Master: ${result.master.count} / ${Math.min(Math.round(result.gold.baseCount * 0.08), 250)}</li>
+        <li>For Grandmaster: ${result.grandmaster.count} / ${Math.min(Math.round(result.gold.baseCount * 0.02), 75)}</li>
     </ul>
     </p>
     
@@ -972,7 +1012,7 @@ function rankInfo2Html(result, ignoreCombineChecked = false, isCard = false, two
     <div style="display: flex; justify-content: space-between; gap: 20px;">
     <div style="flex: 1;">
         <h4>以 Expert 为 Universe</h4>
-        <p><strong>总排名:</strong> ${result.expert.rank} / ${Math.round(result.gold.baseCount * 0.2)}</p>
+        <p><strong>总排名:</strong> ${result.expert.rank} / ${Math.min(Math.round(result.gold.baseCount * 0.2), 675)}</p>
         <ul>
             <li>Operator Count: ${result.expert.operatorCountRank} 名</li>
             <li>Operator Avg: ${result.expert.operatorAvgRank} 名</li>
@@ -987,7 +1027,7 @@ function rankInfo2Html(result, ignoreCombineChecked = false, isCard = false, two
 
     <div style="flex: 1;">
         <h4>以 Master 为 Universe</h4>
-        <p><strong>总排名:</strong> ${result.master.rank} / ${Math.round(result.gold.baseCount * 0.08)}</p>
+        <p><strong>总排名:</strong> ${result.master.rank} / ${Math.min(Math.round(result.gold.baseCount * 0.08), 250)}</p>
         <ul>
             <li>Operator Count: ${result.master.operatorCountRank} 名</li>
             <li>Operator Avg: ${result.master.operatorAvgRank} 名</li>
@@ -1002,7 +1042,7 @@ function rankInfo2Html(result, ignoreCombineChecked = false, isCard = false, two
 
     <div style="flex: 1;">
         <h4>以 Grandmaster 为 Universe</h4>
-        <p><strong>总排名:</strong> ${result.grandmaster.rank} / ${Math.round(result.gold.baseCount * 0.02)}</p>
+        <p><strong>总排名:</strong> ${result.grandmaster.rank} / ${Math.min(Math.round(result.gold.baseCount * 0.02), 75)}</p>
         <ul>
             <li>Operator Count: ${result.grandmaster.operatorCountRank} 名</li>
             <li>Operator Avg: ${result.grandmaster.operatorAvgRank} 名</li>
@@ -1075,7 +1115,7 @@ async function insertMyRankInfo(data, savedTimestamp, forceRefresh = false) { //
     let oneWeekMetrics = null;
     try {
         // Removed setButtonState calls related to WQPOPSFetchButton from here.
-        const userAlphas = await fetchAllAlphas(forceRefresh); // Pass forceRefresh to fetchAllAlphas
+        const userAlphas = await fetchAllAlphas(forceRefresh, true); // Pass forceRefresh to fetchAllAlphas
         
         const seasonMetrics = calculatePerformanceMetrics(userAlphas);
         Object.assign(finalUserData, seasonMetrics);
@@ -1555,6 +1595,7 @@ function insertButton() {
         buttonContainer.appendChild(ButtonGen('排名分析', 'WQPRankFetchButton', rankAnaClickHandler));
         buttonContainer.appendChild(ButtonGen('显示排名分析', 'WQPRankShowButton', insertMyRankInfo));
         buttonContainer.appendChild(ButtonGen('显示排名列表', 'WQPRankListShowButton', insertRankListInfo));
+        buttonContainer.appendChild(ButtonGen('季度分析', 'WQPQuarterlyAnalysisButton', displayQuarterlyAnalysis));
         // Removed "显示我的排名" button as per user request.
 
         targetElement.insertAdjacentElement('afterend', buttonContainer);
@@ -1624,13 +1665,17 @@ async function insertPyramidDistributionCard() {
         <div id="pyramidDistributionCard" class="card">
             <div class="card_wrapper">
                 <div class="card__content" style="padding-bottom: 26px;max-width: 100%">
-                    <h3 style="font-size: 1.5rem; font-weight: bold; margin-bottom: 10px;">Pyramid Distribution</h3>
-                    <div style="display: flex; gap: 10px; margin-bottom: 10px;">
-                        <select id="pyramidYearSelect"></select>
-                        <select id="pyramidMonthSelect"></select>
-                        <button id="fetchPyramidData">获取数据</button>
+                    <h3 style="font-size: 1.5rem; font-weight: bold; margin-bottom: 10px;">Pyramid Distribution (按月份范围)</h3>
+                    <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; align-items: center;">
+                        <span style="font-weight: bold;">起始:</span>
+                        <select id="startPyramidYearSelect"></select>
+                        <select id="startPyramidMonthSelect"></select>
+                        <span style="font-weight: bold;">结束:</span>
+                        <select id="endPyramidYearSelect"></select>
+                        <select id="endPyramidMonthSelect"></select>
+                        <button id="fetchPyramidData" style="margin-left: auto;">获取数据</button>
                     </div>
-                    <div id="pyramidTableWrapper" style="display: none;"> <!-- Add this wrapper and hide it -->
+                    <div id="pyramidTableWrapper" style="display: none;">
                         <table id="pyramidDistributionTable" class="display nowrap">
                         </table>
                     </div>
@@ -1654,23 +1699,43 @@ async function insertPyramidDistributionCard() {
 }
 
 function populateDateSelectors() {
-    const yearSelect = document.getElementById('pyramidYearSelect');
-    const monthSelect = document.getElementById('pyramidMonthSelect');
+    const startYearSelect = document.getElementById('startPyramidYearSelect');
+    const startMonthSelect = document.getElementById('startPyramidMonthSelect');
+    const endYearSelect = document.getElementById('endPyramidYearSelect');
+    const endMonthSelect = document.getElementById('endPyramidMonthSelect');
+
     const currentYear = new Date().getUTCFullYear();
-    const currentMonth = new Date().getUTCMonth() + 1;
+    const currentMonth = new Date().getUTCMonth() + 1; // 1-12
 
+    // Populate years (e.g., from 2022 to current year)
     for (let year = currentYear; year >= 2022; year--) {
-        let option = new Option(year, year);
-        yearSelect.add(option);
+        const option1 = new Option(year, year);
+        const option2 = new Option(year, year);
+        startYearSelect.add(option1);
+        endYearSelect.add(option2);
     }
 
+    // Populate months (1-12)
     for (let month = 1; month <= 12; month++) {
-        let option = new Option(month, month);
-        monthSelect.add(option);
+        const option1 = new Option(month, month);
+        const option2 = new Option(month, month);
+        startMonthSelect.add(option1);
+        endMonthSelect.add(option2);
     }
 
-    yearSelect.value = currentYear;
-    monthSelect.value = currentMonth;
+    // Set default values for end date to current month
+    endYearSelect.value = currentYear;
+    endMonthSelect.value = currentMonth;
+
+    // Set default values for start date to 3 months ago
+    let defaultStartMonth = currentMonth - 2; // Current month - 2 to get a 3-month range including current
+    let defaultStartYear = currentYear;
+    if (defaultStartMonth <= 0) {
+        defaultStartMonth += 12;
+        defaultStartYear -= 1;
+    }
+    startYearSelect.value = defaultStartYear;
+    startMonthSelect.value = defaultStartMonth;
 }
 
 async function displayPyramidDistribution() {
@@ -1680,10 +1745,18 @@ async function displayPyramidDistribution() {
 
     try {
         console.log('displayPyramidDistribution called');
-        const year = document.getElementById('pyramidYearSelect').value;
-        const month = document.getElementById('pyramidMonthSelect').value;
-        const startDate = new Date(Date.UTC(year, month - 1, 1));
-        const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59));
+        
+        // Get start and end year/month from selectors
+        const startYear = parseInt(document.getElementById('startPyramidYearSelect').value);
+        const startMonth = parseInt(document.getElementById('startPyramidMonthSelect').value);
+        const endYear = parseInt(document.getElementById('endPyramidYearSelect').value);
+        const endMonth = parseInt(document.getElementById('endPyramidMonthSelect').value);
+
+        // Construct startDate and endDate objects for the range
+        // startDate is the first day of the start month
+        const startDate = new Date(Date.UTC(startYear, startMonth - 1, 1));
+        // endDate is the last day of the end month, at the end of the day
+        const endDate = new Date(Date.UTC(endYear, endMonth, 0, 23, 59, 59, 999)); // Last millisecond of the last day of the end month
 
         console.log('Fetching alphas for:', startDate.toISOString(), 'to', endDate.toISOString());
         const userAlphas = await getAlphasByMonth(startDate, endDate); // Pass Date objects directly
@@ -2214,3 +2287,266 @@ setTimeout(() => {
     console.log('[WQP] Third attempt (5s)');
     addPowerPoolProgressBar();
 }, 5000);
+
+// ############################## 季度分析 ##############################
+
+async function displayQuarterlyAnalysis() {
+    console.log('displayQuarterlyAnalysis function called.');
+    try {
+        setButtonState('WQPQuarterlyAnalysisButton', '分析中...', 'load');
+        const { WQPSettings } = await new Promise(resolve => chrome.storage.local.get('WQPSettings', resolve));
+        const stats = await calculateExclusiveLevelStats(WQPSettings);
+        const html = generateQuarterlyAnalysisHTML(stats);
+
+        const mainContent = document.querySelector(targetSelectorButton)?.parentElement;
+        if (mainContent) {
+            let analysisContainer = document.querySelector("#quarterlyAnalysisCard");
+            if (analysisContainer) {
+                analysisContainer.remove();
+            }
+            // Insert after the button container
+            const buttonContainer = document.getElementById('WQButtonContainer');
+            if(buttonContainer){
+                buttonContainer.insertAdjacentHTML('afterend', html);
+            } else {
+                 mainContent.insertAdjacentHTML('afterend', html);
+            }
+        }
+        setButtonState('WQPQuarterlyAnalysisButton', '季度分析', 'enable');
+    } catch (error) {
+        console.error("季度分析失败:", error);
+        setButtonState('WQPQuarterlyAnalysisButton', '分析失败', 'error');
+    }
+}
+
+async function calculateExclusiveLevelStats(WQPSettings) {
+    // We get all data, with finalLevel pre-assigned by getAllRank
+    const { data } = await getAllRank(false); 
+    const stats = {};
+
+    const limits = {
+        grandmaster: 75,
+        master: 250,
+        expert: 675
+    };
+
+    // The `finalLevel` is already exclusive because a user can only have one final level.
+    // We just need to filter by it and respect the cap.
+    const grandmasters = data.filter(u => u.finalLevel === 'grandmaster').slice(0, limits.grandmaster);
+    const masters = data.filter(u => u.finalLevel === 'master').slice(0, limits.master);
+    const experts = data.filter(u => u.finalLevel === 'expert').slice(0, limits.expert);
+
+    const userSets = {
+        grandmaster: grandmasters,
+        master: masters,
+        expert: experts
+    };
+
+    const dataDimensions = [
+        "alphaCount", "pyramidCount", "combinedAlphaPerformance",
+        "combinedSelectedAlphaPerformance", "combinedPowerPoolAlphaPerformance",
+        "operatorCount", "fieldCount", "communityActivity",
+        "completedReferrals", "maxSimulationStreak",
+        "operatorAvg", "fieldAvg"
+    ];
+
+    const rankDimensionPrefixes = [
+        "operatorCount", "fieldCount", "communityActivity",
+        "completedReferrals", "maxSimulationStreak",
+        "operatorAvg", "fieldAvg", "Total"
+    ];
+
+    for (const level of ["grandmaster", "master", "expert"]) {
+        const levelUsers = userSets[level] || [];
+        stats[level] = {
+            count: levelUsers.length,
+            rawData: {},
+            ranks: {}
+        };
+
+        // Raw Data Stats
+        dataDimensions.forEach(dim => {
+            const values = levelUsers.map(user => user[dim]).filter(v => typeof v === 'number' && !isNaN(v));
+            stats[level].rawData[dim] = calculateAverageAndMedian(values);
+        });
+
+        // Rank Data Stats
+        rankDimensionPrefixes.forEach(dimPrefix => {
+            const rankDim = `${level}${dimPrefix}Rank`;
+            const values = levelUsers.map(user => user[rankDim]).filter(v => typeof v === 'number' && !isNaN(v));
+            // Use original dimPrefix for key
+            const key = dimPrefix === 'Total' ? 'total' : dimPrefix;
+            stats[level].ranks[key] = calculateAverageAndMedian(values);
+        });
+    }
+
+    console.log("Calculated Stats:", stats);
+    return stats;
+}
+
+
+function generateQuarterlyAnalysisHTML(stats) {
+    let html = '<div id="quarterlyAnalysisCard" style="margin-top: 20px;">';
+
+    for (const level of ["grandmaster", "master", "expert"]) {
+        const levelStats = stats[level];
+        if (!levelStats || levelStats.count === 0) continue;
+
+        const rawDataHtml = Object.entries(levelStats.rawData).map(([key, value]) => `<li><strong>${key}:</strong> 平均值 = ${value.average.toFixed(2)}, 中位数 = ${value.median.toFixed(2)}</li>`).join('');
+        const rankDataHtml = Object.entries(levelStats.ranks).map(([key, value]) => `<li><strong>${key}:</strong> 平均值 = ${value.average.toFixed(2)}, 中位数 = ${value.median.toFixed(2)}</li>`).join('');
+
+        html += `
+        <article class="card" style="margin-top: 15px;">
+            <div class="card_wrapper">
+                <div class="card__content" style="padding-bottom: 26px; max-width: 100%">
+                    <h3 style="font-size: 1.5rem; font-weight: bold; margin-bottom: 10px;">${level.charAt(0).toUpperCase() + level.slice(1)} (${levelStats.count}人)</h3>
+                    
+                    <h4 style="margin-top: 15px; font-size: 1.1rem;">原始数据:</h4>
+                    <ul style="list-style-type: disc; padding-left: 20px;">
+                        ${rawDataHtml}
+                    </ul>
+
+                    <h4 style="margin-top: 15px; font-size: 1.1rem;">排名数据:</h4>
+                     <ul style="list-style-type: disc; padding-left: 20px;">
+                        ${rankDataHtml}
+                    </ul>
+                </div>
+            </div>
+        </article>
+        `;
+    }
+
+    html += '</div>';
+    return html;
+}
+
+// ############################## 季度分析 ##############################
+
+async function displayQuarterlyAnalysis() {
+    try {
+        setButtonState('WQPQuarterlyAnalysisButton', '分析中...', 'load');
+        const { WQPSettings } = await new Promise(resolve => chrome.storage.local.get('WQPSettings', resolve));
+        const stats = await calculateExclusiveLevelStats(WQPSettings);
+        const html = generateQuarterlyAnalysisHTML(stats);
+
+        const mainContent = document.querySelector(targetSelectorButton)?.parentElement;
+        if (mainContent) {
+            let analysisContainer = document.querySelector("#quarterlyAnalysisCard");
+            if (analysisContainer) {
+                analysisContainer.remove();
+            }
+            // Insert after the button container
+            const buttonContainer = document.getElementById('WQButtonContainer');
+            if(buttonContainer){
+                buttonContainer.insertAdjacentHTML('afterend', html);
+            } else {
+                 mainContent.insertAdjacentHTML('afterend', html);
+            }
+        }
+        setButtonState('WQPQuarterlyAnalysisButton', '季度分析', 'enable');
+    } catch (error) {
+        console.error("季度分析失败:", error);
+        setButtonState('WQPQuarterlyAnalysisButton', '分析失败', 'error');
+    }
+}
+
+async function calculateExclusiveLevelStats(WQPSettings) {
+    // We get all data, with finalLevel pre-assigned by getAllRank
+    const { data } = await getAllRank(false); 
+    const stats = {};
+
+    const limits = {
+        grandmaster: 75,
+        master: 250,
+        expert: 675
+    };
+
+    // The `finalLevel` is already exclusive because a user can only have one final level.
+    // We just need to filter by it and respect the cap.
+    const grandmasters = data.filter(u => u.finalLevel === 'grandmaster').slice(0, limits.grandmaster);
+    const masters = data.filter(u => u.finalLevel === 'master').slice(0, limits.master);
+    const experts = data.filter(u => u.finalLevel === 'expert').slice(0, limits.expert);
+
+    const userSets = {
+        grandmaster: grandmasters,
+        master: masters,
+        expert: experts
+    };
+
+    const dataDimensions = [
+        "alphaCount", "pyramidCount", "combinedAlphaPerformance",
+        "combinedSelectedAlphaPerformance", "combinedPowerPoolAlphaPerformance",
+        "operatorCount", "fieldCount", "communityActivity",
+        "completedReferrals", "maxSimulationStreak",
+        "operatorAvg", "fieldAvg"
+    ];
+
+    const rankDimensionPrefixes = [
+        "operatorCount", "fieldCount", "communityActivity",
+        "completedReferrals", "maxSimulationStreak",
+        "operatorAvg", "fieldAvg", "Total"
+    ];
+
+    for (const level of ["grandmaster", "master", "expert"]) {
+        const levelUsers = userSets[level] || [];
+        stats[level] = {
+            count: levelUsers.length,
+            rawData: {},
+            ranks: {}
+        };
+
+        // Raw Data Stats
+        dataDimensions.forEach(dim => {
+            const values = levelUsers.map(user => user[dim]).filter(v => typeof v === 'number' && !isNaN(v));
+            stats[level].rawData[dim] = calculateAverageAndMedian(values);
+        });
+
+        // Rank Data Stats
+        rankDimensionPrefixes.forEach(dimPrefix => {
+            const rankDim = `${level}${dimPrefix}Rank`;
+            const values = levelUsers.map(user => user[rankDim]).filter(v => typeof v === 'number' && !isNaN(v));
+            // Use original dimPrefix for key
+            const key = dimPrefix === 'Total' ? 'total' : dimPrefix;
+            stats[level].ranks[key] = calculateAverageAndMedian(values);
+        });
+    }
+
+    console.log("Calculated Stats:", stats);
+    return stats;
+}
+
+
+function generateQuarterlyAnalysisHTML(stats) {
+    let html = '<div id="quarterlyAnalysisCard" style="margin-top: 20px;">';
+
+    for (const level of ["grandmaster", "master", "expert"]) {
+        const levelStats = stats[level];
+        if (!levelStats || levelStats.count === 0) continue;
+
+        const rawDataHtml = Object.entries(levelStats.rawData).map(([key, value]) => `<li><strong>${key}:</strong> 平均值 = ${value.average.toFixed(2)}, 中位数 = ${value.median.toFixed(2)}</li>`).join('');
+        const rankDataHtml = Object.entries(levelStats.ranks).map(([key, value]) => `<li><strong>${key}:</strong> 平均值 = ${value.average.toFixed(2)}, 中位数 = ${value.median.toFixed(2)}</li>`).join('');
+
+        html += `
+        <article class="card" style="margin-top: 15px;">
+            <div class="card_wrapper">
+                <div class="card__content" style="padding-bottom: 26px; max-width: 100%">
+                    <h3 style="font-size: 1.5rem; font-weight: bold; margin-bottom: 10px;">${level.charAt(0).toUpperCase() + level.slice(1)} (${levelStats.count}人)</h3>
+                    
+                    <h4 style="margin-top: 15px; font-size: 1.1rem;">原始数据:</h4>
+                    <ul style="list-style-type: disc; padding-left: 20px;">
+                        ${rawDataHtml}
+                    </ul>
+
+                    <h4 style="margin-top: 15px; font-size: 1.1rem;">排名数据:</h4>
+                     <ul style="list-style-type: disc; padding-left: 20px;">
+                        ${rankDataHtml}
+                    </ul>
+                </div>
+            </div>
+        </article>
+        `;
+    }
+
+    html += '</div>';
+    return html;
+}
