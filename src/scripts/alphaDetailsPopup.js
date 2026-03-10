@@ -32,8 +32,8 @@ async function showSubmittedAlphaDetailsCard(event) {
     const selection = window.getSelection();
     const selectedText = selection.toString().trim();
 
-    // 严格校验选中文本：只允许字母、数字和下划线，且不能是空字符串
-    if (!selectedText || !/^[a-zA-Z0-9_]+$/.test(selectedText)) {
+    // 校验选中文本：不能为空，且不能过长
+    if (!selectedText || selectedText.length > 100) {
         return;
     }
 

@@ -2672,12 +2672,22 @@ function dismissOperatorAlphaCardOnEscape(event) {
 }
 
 async function showOperatorAlphasCard(event) {
+    card.disable();
+    event.stopPropagation();
+    
     // 关闭任何现有的卡片
     dismissOperatorAlphaCard();
 
-    const operatorText = event.target.innerText.trim();
+    const selection = window.getSelection();
+    const operatorText = selection.toString().trim();
 
     if (!operatorText) {
+        return;
+    }
+    // 从完整的操作符文本中提取核心操作符名称
+    const coreOperatorName = operatorText.split('(')[0].trim();
+    if (!coreOperatorName) { // 如果提取后为空，则不进行搜索
+        console.warn("WQP DEBUG: 无法提取核心操作符名称，跳过搜索。", operatorText);
         return;
     }
 
@@ -2731,12 +2741,12 @@ async function showOperatorAlphasCard(event) {
 
     try {
         // 获取所有已提交的Alpha
-        const alphas = await getSubmittedFields();
+        const alphas = await fetchAllAlphas(false, true);
 
         console.log("运算符:", operatorText);
-        // 过滤包含该运算符的alpha
+        // 过滤包含该核心运算符名称的alpha
         const matchedAlphas = alphas.filter(alpha =>
-            alpha.regular && alpha.regular.code && alpha.regular.code.includes(operatorText)
+            alpha.regular && alpha.regular.code && alpha.regular.code.includes(coreOperatorName)
         );
         console.log("匹配的Alphas:", matchedAlphas);
 
