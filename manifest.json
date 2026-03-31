@@ -18,6 +18,12 @@
     },
     "content_scripts": [
         {
+            "matches": ["https://platform.worldquantbrain.com/*"],
+            "run_at": "document_start",
+            "world": "MAIN",
+            "js": ["src/scripts/patchColumns.js"]
+        },
+        {
             "matches": [
                 "*://platform.worldquantbrain.com/*"
             ],
@@ -39,6 +45,15 @@
                 "src/css/idcard.css",
                 "src/css/distribution.css"
             ]
+        },
+        {
+            "matches": [
+                "*://platform.worldquantbrain.com/profile/performance"
+            ],
+            "js": [
+                "src/scripts/performanceStyleFix.js"
+            ],
+            "run_at": "document_end"
         },
         {
             "matches": [
@@ -116,6 +131,8 @@
         "alarms",
         "notifications",
         "webRequest",
-        "unlimitedStorage"
+        "unlimitedStorage",
+        "declarativeNetRequest",
+        "webNavigation"
     ]
 }
