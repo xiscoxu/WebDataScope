@@ -819,7 +819,7 @@ async function insertRankListInfo() {
             }
 
             var baseFields = [
-                'Signals', 'Pyramids', 'Combined Alpha Performance', 'Combined Selected Alpha Performance', 'Combined Power Pool Alpha Performance'
+                'Signals', 'Pyramids', 'Combined Alpha Performance', 'Combined Selected Alpha Performance', 'Combined Power Pool Alpha Performance', 'Combined Osmosis Performance'
             ];
             var sixFields = [
                 'Operators used', 'Operator Avg', 'Fields used', 'Field Avg', 'Community Activity', 'Max Simulation Streak'
@@ -959,7 +959,7 @@ async function calculateRanks(data, userId, WQPSettings, ignoreCombine = false) 
         let itemData = data.filter(item => item.alphaCount >= currentLevelCriteria[model].alphaCount && item.pyramidCount >= currentLevelCriteria[model].pyramidCount);
         if (!ignoreCombine) { // Only filter by combine metrics if not ignoring
             if (WQPSettings.geniusCombineTag) {
-                itemData = itemData.filter(item => item.combinedAlphaPerformance >= currentLevelCriteria[model].combinedAlphaPerformance || item.combinedSelectedAlphaPerformance >= currentLevelCriteria[model].combinedSelectedAlphaPerformance || item.combinedPowerPoolAlphaPerformance >= currentLevelCriteria[model].combinedPowerPoolAlphaPerformance);
+                itemData = itemData.filter(item => item.combinedAlphaPerformance >= currentLevelCriteria[model].combinedAlphaPerformance || item.combinedSelectedAlphaPerformance >= currentLevelCriteria[model].combinedSelectedAlphaPerformance || item.combinedPowerPoolAlphaPerformance >= currentLevelCriteria[model].combinedPowerPoolAlphaPerformance || item.combinedOsmosisPerformance >= currentLevelCriteria[model].combinedOsmosisPerformance);
             }
         }
         result['gold'][model + 'Rank'] = itemData.filter(item => item.totalRank < userData.totalRank).length + 1;
