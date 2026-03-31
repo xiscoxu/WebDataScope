@@ -690,6 +690,7 @@ async function insertRankListInfo() {
             { title: 'Max Combined Performance', data: 'maxCombinedAlphaPerformance', visible: false },
 
             { title: 'RA Count', data: 'submissionsCount', visible: false },
+            { title: 'RA Fields Used', data: 'dataFieldsUsed', visible: false },
             { title: 'RA Prod Corr', data: 'meanProdCorrelation', visible: false },
             { title: 'RA Self Corr', data: 'meanSelfCorrelation', visible: false },
             { title: 'SA Count', data: 'superAlphaSubmissionsCount', visible: false },
