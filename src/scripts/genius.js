@@ -8,9 +8,9 @@ console.log('genius.js loaded');
 const OptUrl = 'https://api.worldquantbrain.com/operators';
 // genius level criteria
 const levelCriteria = {
-    "expert": { "alphaCount": 20, "pyramidCount": 10, "combinedAlphaPerformance": 0.5, "combinedSelectedAlphaPerformance": 0.5, "combinedPowerPoolAlphaPerformance": 0.5 },
-    "master": { "alphaCount": 120, "pyramidCount": 30, "combinedAlphaPerformance": 1, "combinedSelectedAlphaPerformance": 1, "combinedPowerPoolAlphaPerformance": 1 },
-    "grandmaster": { "alphaCount": 220, "pyramidCount": 60, "combinedAlphaPerformance": 2, "combinedSelectedAlphaPerformance": 2, "combinedPowerPoolAlphaPerformance": 2 }
+    "expert": { "alphaCount": 20, "pyramidCount": 10, "combinedAlphaPerformance": 0.5, "combinedSelectedAlphaPerformance": 0.5, "combinedPowerPoolAlphaPerformance": 0.5, "combinedOsmosisPerformance": 0.5},
+    "master": { "alphaCount": 120, "pyramidCount": 30, "combinedAlphaPerformance": 1, "combinedSelectedAlphaPerformance": 1, "combinedPowerPoolAlphaPerformance": 1, "combinedOsmosisPerformance": 1},
+    "grandmaster": { "alphaCount": 220, "pyramidCount": 60, "combinedAlphaPerformance": 2, "combinedSelectedAlphaPerformance": 2, "combinedPowerPoolAlphaPerformance": 2, "combinedOsmosisPerformance": 2}
 }
 
 
@@ -385,7 +385,7 @@ async function calculateLevelRankStats(allUsersData, WQPSettings, mode, candidat
 
     const dataDimensions = [
         "alphaCount", "pyramidCount", "combinedAlphaPerformance",
-        "combinedSelectedAlphaPerformance", "combinedPowerPoolAlphaPerformance",
+        "combinedSelectedAlphaPerformance", "combinedPowerPoolAlphaPerformance", "combinedOsmosisPerformance",
         "operatorCount", "fieldCount", "communityActivity",
         "completedReferrals", "maxSimulationStreak",
         "operatorAvg", "fieldAvg"
@@ -408,7 +408,8 @@ async function calculateLevelRankStats(allUsersData, WQPSettings, mode, candidat
                     isPerformanceConditionMet = (
                         user.combinedAlphaPerformance >= criteria.combinedAlphaPerformance ||
                         user.combinedSelectedAlphaPerformance >= criteria.combinedSelectedAlphaPerformance ||
-                        user.combinedPowerPoolAlphaPerformance >= criteria.combinedPowerPoolAlphaPerformance
+                        user.combinedPowerPoolAlphaPerformance >= criteria.combinedPowerPoolAlphaPerformance ||
+                        user.combinedOsmosisPerformance >= criteria.combinedOsmosisPerformance
                     );
                 }
                 return isBaseConditionMet && isPerformanceConditionMet;
@@ -469,7 +470,8 @@ function determineUserLevel(userData, geniusCombineTag, ignoreCombine = false) {
                 isPerformanceConditionMet = (
                     userData.combinedAlphaPerformance >= criteria.combinedAlphaPerformance ||
                     userData.combinedSelectedAlphaPerformance >= criteria.combinedSelectedAlphaPerformance ||
-                    userData.combinedPowerPoolAlphaPerformance >= criteria.combinedPowerPoolAlphaPerformance
+                    userData.combinedPowerPoolAlphaPerformance >= criteria.combinedPowerPoolAlphaPerformance ||
+                    userData.combinedOsmosisPerformance >= criteria.combinedOsmosisPerformance
                 );
             }
         }
@@ -506,7 +508,7 @@ async function getAllRank(ignoreCombine = false) {
                     itemData = data.map((item, index) => ({ ...item, originalIndex: index })).filter(item => item.alphaCount >= currentLevelCriteria[model].alphaCount && item.pyramidCount >= currentLevelCriteria[model].pyramidCount);
                     if (!ignoreCombine) { // Only filter by combine metrics if not ignoring
                         if (WQPSettings.geniusCombineTag) {
-                            itemData = itemData.filter(item => item.combinedAlphaPerformance >= currentLevelCriteria[model].combinedAlphaPerformance || item.combinedSelectedAlphaPerformance >= currentLevelCriteria[model].combinedSelectedAlphaPerformance || item.combinedPowerPoolAlphaPerformance >= currentLevelCriteria[model].combinedPowerPoolAlphaPerformance);
+                            itemData = itemData.filter(item => item.combinedAlphaPerformance >= currentLevelCriteria[model].combinedAlphaPerformance || item.combinedSelectedAlphaPerformance >= currentLevelCriteria[model].combinedSelectedAlphaPerformance || item.combinedPowerPoolAlphaPerformance >= currentLevelCriteria[model].combinedPowerPoolAlphaPerformance || item.combinedOsmosisPerformance >= currentLevelCriteria[model].combinedOsmosisPerformance);
                         }
                     }
                 }
@@ -650,6 +652,12 @@ async function insertRankListInfo() {
 
         data.forEach((item, idx) => {
             item.index = idx + 1;
+			item.maxCombinedAlphaPerformance = Math.max(
+                    item.combinedAlphaPerformance,
+					item.combinedSelectedAlphaPerformance,
+					item.combinedPowerPoolAlphaPerformance,
+					item.combinedOsmosisPerformance,
+			)
         });
         let grandmasterCount = data.filter(item => item.finalLevel === 'grandmaster').length;
 
@@ -678,6 +686,8 @@ async function insertRankListInfo() {
             { title: 'Combined Alpha Performance', data: 'combinedAlphaPerformance', visible: false },
             { title: 'Combined Selected Alpha Performance', data: 'combinedSelectedAlphaPerformance', visible: false },
             { title: 'Combined Power Pool Alpha Performance', data: 'combinedPowerPoolAlphaPerformance', visible: false },
+            { title: 'Combined Osmosis Performance', data: 'combinedOsmosisPerformance', visible: false },
+            { title: 'Max Combined Performance', data: 'maxCombinedAlphaPerformance', visible: false },
 
             { title: 'RA Count', data: 'submissionsCount', visible: false },
             { title: 'RA Prod Corr', data: 'meanProdCorrelation', visible: false },
@@ -2121,7 +2131,7 @@ async function calculateExclusiveLevelStats(WQPSettings) {
 
     const dataDimensions = [
         "alphaCount", "pyramidCount", "combinedAlphaPerformance",
-        "combinedSelectedAlphaPerformance", "combinedPowerPoolAlphaPerformance",
+        "combinedSelectedAlphaPerformance", "combinedPowerPoolAlphaPerformance", "combinedOsmosisPerformance",
         "operatorCount", "fieldCount", "communityActivity",
         "completedReferrals", "maxSimulationStreak",
         "operatorAvg", "fieldAvg"
@@ -2252,7 +2262,7 @@ async function calculateExclusiveLevelStats(WQPSettings) {
 
     const dataDimensions = [
         "alphaCount", "pyramidCount", "combinedAlphaPerformance",
-        "combinedSelectedAlphaPerformance", "combinedPowerPoolAlphaPerformance",
+        "combinedSelectedAlphaPerformance", "combinedPowerPoolAlphaPerformance", "combinedOsmosisPerformance",
         "operatorCount", "fieldCount", "communityActivity",
         "completedReferrals", "maxSimulationStreak",
         "operatorAvg", "fieldAvg"
