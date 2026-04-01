@@ -1207,14 +1207,15 @@ async function insertMyRankInfo(data, savedTimestamp, forceRefresh = false) { //
         const seasonMetrics = calculatePerformanceMetrics(userAlphas);
         Object.assign(finalUserData, seasonMetrics);
 
-        const twoWeeksAgo = new Date();
+        // Use Eastern Time for date calculations
+        const twoWeeksAgo = getEasternTimeDate();
         twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
-        const twoWeekAlphas = userAlphas.filter(a => new Date(a.dateSubmitted) > twoWeeksAgo);
+        const twoWeekAlphas = userAlphas.filter(a => toEasternTime(a.dateSubmitted) > twoWeeksAgo);
         twoWeekMetrics = calculatePerformanceMetrics(twoWeekAlphas);
 
-        const oneWeekAgo = new Date();
+        const oneWeekAgo = getEasternTimeDate();
         oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-        const oneWeekAlphas = userAlphas.filter(a => new Date(a.dateSubmitted) > oneWeekAgo);
+        const oneWeekAlphas = userAlphas.filter(a => toEasternTime(a.dateSubmitted) > oneWeekAgo);
         oneWeekMetrics = calculatePerformanceMetrics(oneWeekAlphas);
 
     } catch (error) {
